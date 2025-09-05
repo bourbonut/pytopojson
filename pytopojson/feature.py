@@ -1,30 +1,12 @@
-from pytopojson import transform
-
-
-class Reverse(object):
-    def __init__(self):
-        pass
-
-    def __call__(self, array, n, *args, **kwargs):
-        j = len(array)
-        i = j - n
-
-        j -= 1
-        while i < j:
-            array[i], array[j] = array[j], array[i]
-            i += 1
-            j -= 1
-
+from pytopojson.transform import transform
 
 class Object(object):
     def __init__(self):
-        self.reverse = Reverse()
-        self.transform = transform.Transform()
         self.transform_point = None
         self.arcs = None
 
-    def __call__(self, topology, o, *args, **kwargs):
-        self.transform_point = self.transform(topology.get("transform", None))
+    def __call__(self, topology, o):
+        self.transform_point = transform(topology.get("transform", None))
         self.arcs = topology["arcs"]
         return self.geometry(o)
 
@@ -32,13 +14,13 @@ class Object(object):
         if any(points):
             points.pop()
 
-        idx = ~i if i < 0 else i
-        arcs = self.arcs[idx]
+        arcs = self.arcs[~i if i < 0 else i]
         for k, arc in enumerate(arcs):
             points.append(self.transform_point(arc, k))
 
         if i < 0:
-            self.reverse(points, len(arcs))
+            j = len(points) - len(arcs)
+            points = points[:j] + points[:j - 1:-1]
 
     def point(self, p):
         return self.transform_point(p)
@@ -57,12 +39,12 @@ class Object(object):
     def ring(self, arcs):
         points = self.line(arcs)
         # This may happen if an arc has only two points.
-        while len(points) < 4:
-            points.append(points[0])
+        if len(points) < 4:
+            points += [points[0]] * (4 - len(points))
         return points
 
     def polygon(self, arcs):
-        return list(map(lambda x: self.ring(x), arcs))
+        return list(map(self.ring, arcs))
 
     def geometry(self, o):
         _type = o.get("type", None)
@@ -70,20 +52,20 @@ class Object(object):
         if _type == "GeometryCollection":
             return {
                 "type": _type,
-                "geometries": list(map(lambda x: self.geometry(x), o["geometries"])),
+                "geometries": list(map(self.geometry, o["geometries"])),
             }
         elif _type == "Point":
             coordinates = self.point(o["coordinates"])
         elif _type == "MultiPoint":
-            coordinates = list(map(lambda x: self.point(x), o["coordinates"]))
+            coordinates = list(map(self.point, o["coordinates"]))
         elif _type == "LineString":
             coordinates = self.line(o["arcs"])
         elif _type == "MultiLineString":
-            coordinates = list(map(lambda x: self.line(x), o["arcs"]))
+            coordinates = list(map(self.line, o["arcs"]))
         elif _type == "Polygon":
             coordinates = self.polygon(o["arcs"])
         elif _type == "MultiPolygon":
-            coordinates = list(map(lambda x: self.polygon(x), o["arcs"]))
+            coordinates = list(map(self.polygon, o["arcs"]))
         else:
             return None
 
@@ -93,33 +75,30 @@ class Object(object):
 class Feature(object):
     def __init__(self):
         self.object = Object()
-        self.reverse = Reverse()
-        self.transform = transform.Transform()
 
     def __call__(self, topology, o, *args, **kwargs):
         if isinstance(o, str):
             o = topology["objects"][o]
-        if o.get("type", None) == "GeometryCollection":
-            return {
-                "type": "FeatureCollection",
-                "features": list(
-                    map(lambda x: self.feature(topology, x), o["geometries"])
-                ),
-            }
+
+        if o.get("type") == "GeometryCollection":
+            features = [self.feature(topology, geometry) for geometry in o["geometries"]]
+            return {"type": "FeatureCollection", "features": features}
         else:
             return self.feature(topology, o)
 
     def feature(self, topology, o):
-        feat = {
-            "id": o.get("id", None),
-            "bbox": o.get("bbox", None),
+        feature = {
             "type": "Feature",
-            "properties": o.get("properties", dict()),
+            "properties": o.get("properties", {}),
             "geometry": self.object(topology, o),
         }
 
-        for k in ("id", "bbox"):
-            if feat[k] is None:
-                del feat[k]
+        id = o.get("id")
+        bbox = o.get("bbox")
+        # Add missing elements if they are not None
+        if id is not None and bbox is not None:
+            feature.update({"id": id, "bbox": bbox})
+        elif id is not None:
+            feature.update({"id": id})
 
-        return feat
+        return feature
