@@ -1,3 +1,5 @@
+from math import floor
+
 from pytopojson import identity
 
 
@@ -25,8 +27,8 @@ class Untransform(object):
             self.x_0, self.y_0 = 0, 0
         output = input.copy()
 
-        x_1 = int(round((input[0] - self.d_x) / self.k_x))
-        y_1 = int(round((input[1] - self.d_y) / self.k_y))
+        x_1 = floor((input[0] - self.d_x) / self.k_x + 0.5)
+        y_1 = floor((input[1] - self.d_y) / self.k_y + 0.5)
         output[0] = x_1 - self.x_0
         output[1] = y_1 - self.y_0
         self.x_0 = x_1
